@@ -1,2 +1,3 @@
-# transcode
-TransCODE: A co-design framework for the transformer and the hardware accelerator
+# TransCODE
+
+TransCODE: A co-design framework for the transformer and the hardware accelerator. More details coming soon...
