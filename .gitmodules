@@ -1,0 +1,6 @@
+[submodule "global_search/acceltran"]
+	path = global_search/acceltran
+	url = https://github.com/JHA-Lab/acceltran.git
+[submodule "acceltran"]
+	path = acceltran
+	url = https://github.com/JHA-Lab/acceltran.git
