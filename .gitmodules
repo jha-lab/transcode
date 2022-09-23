@@ -1,3 +1,6 @@
 [submodule "acceltran"]
 	path = acceltran
 	url = https://github.com/JHA-Lab/acceltran.git
+[submodule "boshnas"]
+	path = boshnas
+	url = https://github.com/JHA-Lab/boshnas.git
