@@ -1,0 +1,47 @@
+# Design space from BERT-Tiny to BERT-Base
+# Nine pre-trained models available at googl-research/bert
+
+
+hidden_size:
+  - 128
+  - 256
+  - 512
+  - 768
+num_heads:
+  - 2
+  - 4
+  - 8
+  - 12
+encoder_layers:
+  - 2
+  - 4
+  - 6
+  - 8
+  - 10
+  - 12
+operation_types:
+  - sa
+  - l
+  - c
+number_of_feed-forward_stacks:
+  - 1
+  - 2 # An extra
+  - 3 # An extra
+feed-forward_hidden:
+  - 256 # An extra
+  - 512
+  - 1024
+  - 2048
+  - 3072
+  - 4096 # An extra
+operation_parameters:
+  sa:
+    - sdp
+    - wma # An extra
+  l:
+    - dft # An extra
+    - dct # An extra
+  c:
+    - 5 # An extra
+    - 9 # An extra
+    - 13 # An extra
