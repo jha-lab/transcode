@@ -329,6 +329,8 @@ def get_nearest_valid_embedding(embedding: list, design_space: dict, space: str 
             embedding[i] = min(design_space['tile'][tile], key=lambda x : abs(x - embedding[i]))
             i += 1
 
+        embedding[2] = embedding[1]
+
         for decision in ['pe', 'lanes_per_pe', 'mac_per_lane', 'softmax_per_pe', 'batch_size', 'activation_buffer_size', 'weight_buffer_size', 'mask_buffer_size']:
             embedding[i] = min(design_space[decision], key=lambda x : abs(x - embedding[i]))
             i += 1
