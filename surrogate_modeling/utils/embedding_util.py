@@ -147,16 +147,14 @@ def embedding_to_config(embedding: list, design_space: dict):
 
     ordered_configs = [('rram', 16, 2, 2), ('rram', 8, 2, 4), ('rram', 4, 2, 8), ('rram', 2, 2, 16), ('rram', 32, 2, 1), ('rram', 1, 2, 32), ('dram', 16, 2, 2), ('dram', 8, 2, 4), ('dram', 32, 2, 1), ('dram', 16, 4, 1), ('hbm', 32, 1, 4)] 
 
-    config['main_memory']['type'] = ordered_configs[embedding[-2]][0]
+    config['main_memory']['type'] = ordered_configs[embedding[-1]][0]
     config['main_memory']['mode'] = 'lb' if config['main_memory']['type'] == 'dram' else 'hb'
-    config['main_memory']['banks'], config['main_memory']['ranks'], config['main_memory']['channels'] = ordered_configs[embedding[-2]][1], ordered_configs[embedding[-2]][2], ordered_configs[embedding[-2]][3]
+    config['main_memory']['banks'], config['main_memory']['ranks'], config['main_memory']['channels'] = ordered_configs[embedding[-1]][1], ordered_configs[embedding[-1]][2], ordered_configs[embedding[-1]][3]
 
     # Determine batch size based on heuristic
     config['scheduler']['compute_ops']['batch_size'] = config['pe'] // 4
 
-    dataflows = ['_'.join(loop_unrolling) for loop_unrolling in itertools.permutations(['b', 'i', 'j', 'k'])]
-
-    config['loop_unrolling'] = dataflows[embedding[-1]]
+    config['loop_unrolling'] = 'b_i_j_k'
 
     return config
 
@@ -172,7 +170,7 @@ def config_to_embedding(config: dict, design_space: dict):
         embedding (list): embedding for the given accelerator
     """
 
-    embedding = [0 for _ in range(13)]
+    embedding = [0 for _ in range(12)]
 
     i = 0
     for tile in config['tile'].keys():
@@ -189,12 +187,8 @@ def config_to_embedding(config: dict, design_space: dict):
 
     for i, c in enumerate(ordered_configs):
         if all([(a == b) for a, b in zip(main_memory_config, c)]): 
-            embedding[-2] = i
+            embedding[-1] = i
             break
-
-    dataflows = ['_'.join(loop_unrolling) for loop_unrolling in itertools.permutations(['b', 'i', 'j', 'k'])]
-
-    embedding[-1] = dataflows.index(config['loop_unrolling'])
 
     assert is_valid_embedding(embedding, design_space, 'accelerator')
 
@@ -248,7 +242,7 @@ def get_embedding_bounds(design_space: dict, model_types: str = 'all', space: st
             else:
                 bounds[layer * 3 + 3] = (median_num_heads_idx + 1, len(attention_ops) - 1)
     else:
-        embedding_length = 13
+        embedding_length = 12
 
         bounds = [() for i in range(embedding_length)]
 
@@ -261,8 +255,7 @@ def get_embedding_bounds(design_space: dict, model_types: str = 'all', space: st
             bounds[i] = (min(design_space[decision]), max(design_space[decision]))
             i += 1
         
-        bounds[-2] = (0, 10)
-        bounds[-1] = (0, 23)
+        bounds[-1] = (0, 10)
 
     return bounds
 
@@ -295,7 +288,7 @@ def is_valid_embedding(embedding: list, design_space: dict, space: str = 'transf
         except:
             return False
     else:
-        embedding_length = 13
+        embedding_length = 12
 
         i = 0
         for tile in design_space['tile'].keys():
@@ -306,8 +299,7 @@ def is_valid_embedding(embedding: list, design_space: dict, space: str = 'transf
             if embedding[i] not in design_space[decision]: return False
             i += 1
 
-        if embedding[-2] not in np.arange(0, 11): return False
-        if embedding[-1] not in np.arange(0, 24): return False
+        if embedding[-1] not in np.arange(0, 11): return False
 
         return True
 
@@ -330,7 +322,7 @@ def get_nearest_valid_embedding(embedding: list, design_space: dict, space: str 
         embedding[design_space['encoder_layers'][embedding[0]] * 3 + 1:] = \
             [0 for i in range(len(embedding[design_space['encoder_layers'][embedding[0]] * 3 + 1:]))]
     else:
-        embedding_length = 13
+        embedding_length = 12
 
         i = 0
         for tile in design_space['tile'].keys():
@@ -341,8 +333,7 @@ def get_nearest_valid_embedding(embedding: list, design_space: dict, space: str 
             embedding[i] = min(design_space[decision], key=lambda x : abs(x - embedding[i]))
             i += 1
 
-        embedding[-2] = min(np.arange(0, 11), key=lambda x : abs(x - embedding[-2]))
-        embedding[-1] = min(np.arange(0, 24), key=lambda x : abs(x - embedding[-1]))
+        embedding[-1] = min(np.arange(0, 11), key=lambda x : abs(x - embedding[-1]))
 
     assert is_valid_embedding(embedding, design_space, space)
 
