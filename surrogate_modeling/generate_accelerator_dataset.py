@@ -65,9 +65,16 @@ def simulate_pair(samples: dict, sample: str, design_space_flexibert: dict, desi
         logs_dir = f'./temp/{sample}_{txf_sample}/'
         os.makedirs(os.path.join(logs_dir, 'metrics'))
 
+        failed_attempt = False
+
         while True:
+            if not failed_attempt:
+                model_dict = txf_samples[txf_sample]['model_dict']
+            else:
+                txf_samples_new = embedding_util.get_samples(design_space_flexibert, 1, 'Random', space='transformer')
+                model_dict = txf_samples_new[list(txf_samples_new.keys())[0]]['model_dict']
             try:
-                logs = simulate_fast(txf_samples[txf_sample]['model_dict'],
+                logs = simulate_fast(model_dict,
                                  embedding_util.embedding_to_config(samples[sample], design_space_acceltran),
                                  constants, 
                                  design_space_acceltran,
@@ -75,14 +82,7 @@ def simulate_pair(samples: dict, sample: str, design_space_flexibert: dict, desi
                                  1000, 
                                  debug=False)
             except RuntimeError:
-                txf_samples_new = embedding_util.get_samples(design_space_flexibert, 1, 'Random', space='transformer')
-                logs = simulate_fast(txf_samples_new[list(txf_samples_new.keys())[0]]['model_dict'],
-                                 embedding_util.embedding_to_config(samples[sample], design_space_acceltran),
-                                 constants, 
-                                 design_space_acceltran,
-                                 logs_dir, 
-                                 1000, 
-                                 debug=False)
+                failed_attempt = True
             else:
                 break
         
