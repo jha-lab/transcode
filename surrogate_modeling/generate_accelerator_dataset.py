@@ -94,6 +94,9 @@ def simulate_pair(samples: dict, sample: str, design_space_flexibert: dict, desi
                                              'acc_embedding': list(map(int, samples[sample])),
                                              'logs_fast': logs}
 
+    os.makedirs('./dataset/dataset_accelerator/', exist_ok=True)
+    json.dump(dataset, open(f'./dataset/dataset_accelerator/{sample}.json', 'w+'))
+
     return dataset
 
 
@@ -147,11 +150,18 @@ def main():
 
     constants = yaml.safe_load(open(args.constants_file))
 
-    samples = embedding_util.get_samples(design_space_acceltran, 16, 'Random', space='accelerator')
+    dataset_list = []
+    if os.path.exists('./dataset/dataset_accelerator/') and not os.listdir('./dataset/dataset_accelerator/'):
+        for sample_file in os.listdir('./dataset/dataset_accelerator/'):
+            dataset_list.append(json.load(os.path.join('./dataset/dataset_accelerator/', sample_file)))
+
+    samples = embedding_util.get_samples(design_space_acceltran, 16 - len(dataset_list), 'Random', space='accelerator')
+
+    print(f'Running evaluation on {len(samples)} accelerators')
 
     # Get performance for transformer-accelerator pairs
     with mp.Pool(processes=args.num_processes) as pool:
-        dataset_list = pool.starmap(simulate_pair, [(samples, sample, design_space_flexibert, design_space_acceltran, constants, gbdtr) for sample in samples.keys()])
+        dataset_list.extend(pool.starmap(simulate_pair, [(samples, sample, design_space_flexibert, design_space_acceltran, constants, gbdtr) for sample in samples.keys()]))
 
     dataset = {}
     for sample_dict in dataset_list:
