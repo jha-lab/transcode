@@ -153,7 +153,7 @@ def main():
     dataset_list = []
     if os.path.exists('./dataset/dataset_accelerator/') and not os.listdir('./dataset/dataset_accelerator/'):
         for sample_file in os.listdir('./dataset/dataset_accelerator/'):
-            dataset_list.append(json.load(os.path.join('./dataset/dataset_accelerator/', sample_file)))
+            dataset_list.append(json.load(open(os.path.join('./dataset/dataset_accelerator/', sample_file))))
 
     samples = embedding_util.get_samples(design_space_acceltran, 16 - len(dataset_list), 'Random', space='accelerator')
 
