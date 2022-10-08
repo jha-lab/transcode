@@ -259,6 +259,7 @@ def main(args):
 		
 		best_performance = np.amin(y)
 		print(f'Current iteration: {itn + 1}. \tBest performance: {best_performance}')
+		itn += 1
 		
 		# Update same_performance to check convergence
 		if best_performance == old_best_performance:
