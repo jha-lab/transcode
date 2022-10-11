@@ -1,3 +1,7 @@
+# Repo-specific
+dynaprop/utils/huggingface_datasets/
+dynaprop/utils/squad_v2/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
