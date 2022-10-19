@@ -42,6 +42,7 @@ USE_NON_PRUNED = True
 PREFIX_CHECKPOINT_DIR = "checkpoint"
 GLUE_TASKS = ['cola', 'mnli', 'mrpc', 'qnli', 'qqp', 'rte', 'sst2', 'stsb', 'wnli']
 MAX_K = {'sst2': 512, 'squad_v2': 384}
+NUM_EPOCHS = 1
 
 
 def get_training_args(output_dir, task, do_train, train_threshold, sparsity_file):
@@ -50,10 +51,11 @@ def get_training_args(output_dir, task, do_train, train_threshold, sparsity_file
 			--task_name sst2 \
 			--do_eval \
 			{"--do_train" if do_train else ""} \
+			--num_train_epochs {NUM_EPOCHS} \
 			--logging_steps 50 \
 			--max_seq_length 512 \
 			--overwrite_output_dir \
-			--per_device_train_batch_size 16 \
+			--per_device_train_batch_size 512 \
 			--per_device_eval_batch_size 64 \
 			--dynaprop_min_norm {train_threshold} \
 			--dynaprop_json_file {sparsity_file} \
@@ -64,10 +66,11 @@ def get_training_args(output_dir, task, do_train, train_threshold, sparsity_file
 			--version_2_with_negative \
 			--do_eval \
 			{"--do_train" if do_train else ""} \
+			--num_train_epochs {NUM_EPOCHS} \
 			--logging_steps 50 \
 			--max_seq_length 384 \
 			--overwrite_output_dir \
-			--per_device_train_batch_size 16 \
+			--per_device_train_batch_size 512 \
 			--per_device_eval_batch_size 64 \
 			--dynaprop_min_norm {train_threshold} \
 			--dynaprop_json_file {sparsity_file} \
@@ -103,11 +106,17 @@ def main(args):
 		if args.model_name == 'bert-base':
 			if not os.path.exists('./models/bert-base-sst2/pytorch_model.bin'):
 				# Load tokenizer and model
-				tokenizer = BertTokenizer.from_pretrained('howey/bert-base-uncased-sst2')
+				if args.do_train:
+					tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+				else:
+					tokenizer = BertTokenizer.from_pretrained('howey/bert-base-uncased-sst2')
 				tokenizer.save_pretrained('./models/bert-base-sst2/')
 				
 				# Initialize and save given model
-				model = DTBertForSequenceClassification.from_pretrained('howey/bert-base-uncased-sst2')
+				if args.do_train:
+					model = DTBertForSequenceClassification.from_pretrained('bert-base-uncased')
+				else:
+					model = DTBertForSequenceClassification.from_pretrained('howey/bert-base-uncased-sst2')
 				model.save_pretrained('./models/bert-base-sst2/')
 			tokenizer = BertTokenizer.from_pretrained('./models/bert-base-sst2/')
 			model = DTBertForSequenceClassification.from_pretrained('./models/bert-base-sst2/')
@@ -124,11 +133,17 @@ def main(args):
 		elif args.model_name == 'bert-tiny':
 			if not os.path.exists('./models/bert-tiny-sst2/pytorch_model.bin'):
 				# Load tokenizer and model
-				tokenizer = BertTokenizer.from_pretrained('philschmid/tiny-bert-sst2-distilled')
+				if args.do_train:
+					tokenizer = BertTokenizer.from_pretrained('prajjwal1/bert-tiny')
+				else:
+					tokenizer = BertTokenizer.from_pretrained('philschmid/tiny-bert-sst2-distilled')
 				tokenizer.save_pretrained('./models/bert-tiny-sst2/')
 				
 				# Initialize and save given model
-				model = DTBertForSequenceClassification.from_pretrained('philschmid/tiny-bert-sst2-distilled')
+				if args.do_train:
+					model = DTBertForSequenceClassification.from_pretrained('prajjwal1/bert-tiny')
+				else:
+					model = DTBertForSequenceClassification.from_pretrained('philschmid/tiny-bert-sst2-distilled')
 				model.save_pretrained('./models/bert-tiny-sst2/')
 			tokenizer = BertTokenizer.from_pretrained('./models/bert-tiny-sst2/')
 			model = DTBertForSequenceClassification.from_pretrained('./models/bert-tiny-sst2/')
@@ -136,27 +151,39 @@ def main(args):
 		if args.model_name == 'bert-base':
 			if not os.path.exists('./models/bert-base-squad_v2/pytorch_model.bin'):
 				# Load tokenizer and model
-				tokenizer = BertTokenizer.from_pretrained('deepset/bert-base-uncased-squad2')
+				if args.do_train:
+					tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+				else:
+					tokenizer = BertTokenizer.from_pretrained('deepset/bert-base-uncased-squad2')
 				tokenizer.save_pretrained('./models/bert-base-squad_v2/')
 				
 				# Initialize and save given model
-				model = DTBertForQuestionAnswering.from_pretrained('deepset/bert-base-uncased-squad2')
+				if args.do_train:
+					model = DTBertForSequenceClassification.from_pretrained('bert-base-uncased')
+				else:
+					model = DTBertForQuestionAnswering.from_pretrained('deepset/bert-base-uncased-squad2')
 				model.save_pretrained('./models/bert-base-squad_v2/')
 			tokenizer = BertTokenizer.from_pretrained('./models/bert-base-squad_v2/')
 			model = DTBertForQuestionAnswering.from_pretrained('./models/bert-base-squad_v2/')
 		elif args.model_name == 'bert-tiny':
 			if not os.path.exists('./models/bert-tiny-squad_v2/pytorch_model.bin'):
 				# Load tokenizer and model
-				tokenizer = BertTokenizer.from_pretrained('mrm8488/bert-tiny-finetuned-squadv2')
+				if args.do_train:
+					tokenizer = BertTokenizer.from_pretrained('prajjwal1/bert-tiny')
+				else:
+					tokenizer = BertTokenizer.from_pretrained('mrm8488/bert-tiny-finetuned-squadv2')
 				tokenizer.save_pretrained('./models/bert-tiny-squad_v2/')
 				
 				# Initialize and save given model
-				model = DTBertForQuestionAnswering.from_pretrained('mrm8488/bert-tiny-finetuned-squadv2')
+				if args.do_train:
+					model = DTBertForSequenceClassification.from_pretrained('prajjwal1/bert-tiny')
+				else:
+					model = DTBertForQuestionAnswering.from_pretrained('mrm8488/bert-tiny-finetuned-squadv2')
 				model.save_pretrained('./models/bert-tiny-squad_v2/')
 			tokenizer = BertTokenizer.from_pretrained('./models/bert-tiny-squad_v2/')
 			model = DTBertForQuestionAnswering.from_pretrained('./models/bert-tiny-squad_v2/')
 
-	output_dir = os.path.join('./results/' if USE_NON_PRUNED else './results/nn_pruning/', f'{args.model_name}_{args.task}_{"di" if args.max_eval_threshold is not None else ""}_{"dt" if args.max_train_threshold > 0 else ""}_{"wp" if args.prune_weights else ""}')
+	output_dir = os.path.join('./results/' if USE_NON_PRUNED else './results/nn_pruning/', f'{args.model_name}_{args.task}{"_di" if args.max_eval_threshold is not None else ""}{"_dt" if args.max_train_threshold > 0 else ""}{"_wp" if args.prune_weights else ""}')
 
 	print(f'Output directory: {output_dir}')
 
@@ -172,10 +199,10 @@ def main(args):
 		eval_thresholds = list(np.arange(0, args.max_eval_threshold, 0.005))
 		train_thresholds = [None for _ in range(len(eval_thresholds))]
 	elif args.max_train_threshold is not None and args.max_eval_threshold is None:
-		train_thresholds = list(np.arange(0, args.max_train_threshold, 0.005))
+		train_thresholds = list(np.arange(0, args.max_train_threshold, 5e-5))
 		eval_thresholds = [0 for _ in range(len(train_thresholds))]
 	elif args.max_train_threshold is not None and args.max_eval_threshold is not None:
-		eval_thresholds, train_thresholds = np.meshgrid(np.arange(0, args.max_eval_threshold, 0.005), np.arange(0, args.max_train_threshold, 0.005))
+		eval_thresholds, train_thresholds = np.meshgrid(np.arange(0, args.max_eval_threshold, 0.005), np.arange(0, args.max_train_threshold, 5e-5))
 		eval_thresholds, train_thresholds = eval_thresholds.reshape(-1).tolist(), train_thresholds.reshape(-1).tolist()
 	else:
 		raise ValueError(f'Either max_pruning_threshold or min_grad_threshold has to be given')
@@ -270,7 +297,7 @@ def main(args):
 		else:
 			result['activation_sparsity'] = 0
 		if t > 0:
-			sparsity = json.load(open(cos.path.join(temp_dir, 'grad_sparsity.json')))
+			sparsity = json.load(open(os.path.join(temp_dir, 'grad_sparsity.json')))
 			matrix_sizes, num_zeros = 0, 0
 			for sp in sparsity:
 				num_zeros += sp[0]
@@ -289,23 +316,19 @@ def main(args):
 		results.append(result)
 		json.dump(results, open(os.path.join(output_dir, 'results.json'), 'w+'))
 
-	# fig, ax1 = plt.subplots()
-	# ax2 = ax1.twinx()
-	# ax1.set_ylabel('Accuracy on SST-2 task (%)' if args.task == 'sst2' else 'F1 Score on SQuAD-v2', color='k')
-	# metric = 'accuracy' if args.task == 'sst2' else 'f1'
-	# mult = 100.0 if args.task == 'sst2' else 1.0
-	# ax1.plot([result['pruning_threshold' if args.max_pruning_threshold > 0 else 'k'] for result in results], [result[metric] * mult for result in results], color='k')
+	fig, ax1 = plt.subplots()
+	ax2 = ax1.twinx()
+	ax1.set_ylabel('Accuracy on SST-2 task (%)' if args.task == 'sst2' else 'F1 Score on SQuAD-v2', color='k')
+	metric = 'accuracy' if args.task == 'sst2' else 'f1'
+	mult = 100.0 if args.task == 'sst2' else 1.0
+	ax1.plot([result['eval_threshold' if args.max_eval_threshold is not None else 'train_threshold'] for result in results], [result[metric] * mult for result in results], color='k')
 	
-	# ax2.set_xlabel('Pruning threshold' if args.max_pruning_threshold > 0 else 'Top "k"')
-	# ax2.set_ylabel('Activation sparsity (%)')
-	# ax2.tick_params(axis='y', labelcolor='tab:red')
-	# ax2.plot([result['pruning_threshold' if args.max_pruning_threshold > 0 else 'k'] for result in results], [result['activation_sparsity'] * 100 for result in results], color='tab:red')
+	ax1.set_xlabel('DynaTran pruning threshold' if args.max_eval_threshold is not None else 'DynaProp pruning threshold')
+	ax2.set_ylabel('Activation sparsity (%)' if args.max_eval_threshold is not None else 'Grad. sparsity (%)')
+	ax2.tick_params(axis='y', labelcolor='tab:red')
+	ax2.plot([result['eval_threshold' if args.max_eval_threshold is not None else 'train_threshold'] for result in results], [result['activation_sparsity' if args.max_eval_threshold is not None else 'grad_sparsity'] * 100 for result in results], color='tab:red')
 
-	# if args.min_k < MAX_K[args.task]:
-	# 	ax1.set_xscale('log', basex=2); ax2.set_xscale('log', basex=2)
-	# 	ax1.set_xticks([1, 2, 4, 8, 16, 32, 64, 128, 256, 512])
-	# 	ax1.set_xticklabels([1, 2, 4, 8, 16, 32, 64, 128, 256, 512])
-	# plt.savefig(os.path.join(output_dir, 'results.pdf'), bbox_inches='tight')
+	plt.savefig(os.path.join(output_dir, 'results.pdf'), bbox_inches='tight')
 
 
 if __name__ == '__main__':
