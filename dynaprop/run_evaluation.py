@@ -42,7 +42,7 @@ USE_NON_PRUNED = True
 PREFIX_CHECKPOINT_DIR = "checkpoint"
 GLUE_TASKS = ['cola', 'mnli', 'mrpc', 'qnli', 'qqp', 'rte', 'sst2', 'stsb', 'wnli']
 MAX_K = {'sst2': 512, 'squad_v2': 384}
-NUM_EPOCHS = 1
+NUM_EPOCHS = 3
 
 
 def get_training_args(output_dir, task, do_train, train_threshold, sparsity_file):
@@ -196,13 +196,13 @@ def main(args):
 		assert args.max_train_threshold is not None
 
 	if args.max_eval_threshold is not None and args.max_train_threshold is None:
-		eval_thresholds = list(np.arange(0, args.max_eval_threshold, 0.005))
+		eval_thresholds = list(np.arange(0, args.max_eval_threshold, 0.01))
 		train_thresholds = [None for _ in range(len(eval_thresholds))]
 	elif args.max_train_threshold is not None and args.max_eval_threshold is None:
 		train_thresholds = list(np.arange(0, args.max_train_threshold, 5e-5))
 		eval_thresholds = [0 for _ in range(len(train_thresholds))]
 	elif args.max_train_threshold is not None and args.max_eval_threshold is not None:
-		eval_thresholds, train_thresholds = np.meshgrid(np.arange(0, args.max_eval_threshold, 0.005), np.arange(0, args.max_train_threshold, 5e-5))
+		eval_thresholds, train_thresholds = np.meshgrid(np.arange(0, args.max_eval_threshold, 0.01), np.arange(0, args.max_train_threshold, 5e-5))
 		eval_thresholds, train_thresholds = eval_thresholds.reshape(-1).tolist(), train_thresholds.reshape(-1).tolist()
 	else:
 		raise ValueError(f'Either max_pruning_threshold or min_grad_threshold has to be given')
