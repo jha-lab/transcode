@@ -55,7 +55,7 @@ def get_training_args(output_dir, task, do_train, train_threshold, sparsity_file
 			--logging_steps 50 \
 			--max_seq_length 512 \
 			--overwrite_output_dir \
-			--per_device_train_batch_size 512 \
+			--per_device_train_batch_size 64 \
 			--per_device_eval_batch_size 64 \
 			--dynaprop_min_norm {train_threshold} \
 			--dynaprop_json_file {sparsity_file} \
