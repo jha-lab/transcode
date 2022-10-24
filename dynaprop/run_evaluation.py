@@ -99,6 +99,9 @@ def main(args):
 	assert args.task in ['sst2', 'squad_v2'], 'Only the SST2 and SQuAD v2 tasks are supported right now'
 	assert args.model_name in ['bert-tiny', 'bert-base'], 'Only BERT-Tiny and BERT-Base are supported right now'
 
+	if args.do_train and args.task == 'squad_v2':
+		raise ValueError('Training not supported with SQuAD-v2 dataset')
+
 	# Load all GLUE datasets
 	load_all_glue_datasets()
 
