@@ -285,7 +285,9 @@ def main(args):
 
 		# Run evaluation on the SST-2 task or the SQuAD task
 		training_args = get_training_args(temp_dir, args.task, args.do_train, t, os.path.join(temp_dir, 'grad_sparsity.json'))
+		start_time = time.time()
 		metrics = run_glue(training_args) if args.task == 'sst2' else run_squad_legacy.evaluate(training_args, temp_model, tokenizer)
+		end_time = time.time()
 		print(metrics)
 
 		if i > 0:
@@ -316,6 +318,8 @@ def main(args):
 		else:
 			result['f1'] = metrics['f1']
 
+		result['time'] = end_time - start_time
+		
 		results.append(result)
 		json.dump(results, open(os.path.join(output_dir, 'results.json'), 'w+'))
 
