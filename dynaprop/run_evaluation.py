@@ -16,9 +16,9 @@ import re
 import json
 import math
 import numpy as np
-from utils.run_glue import main as run_glue
-from utils.run_squad import main as run_squad
-from utils import run_squad_legacy
+from eval_utils.run_glue import main as run_glue
+from eval_utils.run_squad import main as run_squad
+from eval_utils import run_squad_legacy
 import time
 import platform
 
@@ -26,6 +26,7 @@ from load_all_glue_datasets import main as load_all_glue_datasets
 from datasets import load_dataset, load_metric
 from tokenize_glue_datasets import save_dataset
 from matplotlib import pyplot as plt
+import multiprocessing as mp
 
 sys.path.append('../txf_design-space/transformers/src/transformers')
 from transformers import BertTokenizer
@@ -43,6 +44,7 @@ PREFIX_CHECKPOINT_DIR = "checkpoint"
 GLUE_TASKS = ['cola', 'mnli', 'mrpc', 'qnli', 'qqp', 'rte', 'sst2', 'stsb', 'wnli']
 MAX_K = {'sst2': 512, 'squad_v2': 384}
 NUM_EPOCHS = 3
+NUM_PARALLEL = 8
 
 
 def get_training_args(output_dir, task, do_train, train_threshold, sparsity_file):
@@ -94,6 +96,121 @@ def get_tokenizer_args(output_dir, task):
 	return training_args
 
 
+def run_evaluation(i, t, args, output_dir, tokenizer, tokenizer_wp, model, model_wp, results):
+
+	print(f'Running evaluation with inference threshold: {i} and training threshold: {t}')
+	result = {'eval_threshold': i, 'train_threshold': t}
+
+	# Make new output directory
+	temp_dir = os.path.join(output_dir, f'threshold_i-p{str(i)[2:]}_t-p{str(t)[2:]}')
+	if os.path.exists(os.path.join(temp_dir, 'dynaprop_results.json')):
+		print(f'Results already stored')
+		return json.load(os.path.join(temp_dir, 'dynaprop_results.json'))
+
+	# Load and save tokenizer
+	temp_tokenizer = tokenizer
+	if args.task == 'sst2' and args.model_name == 'bert-base' and not USE_NON_PRUNED:
+		temp_tokenizer = tokenizer_wp
+	temp_tokenizer.save_pretrained(temp_dir)
+
+	# Initialize and save given model
+	temp_model = model
+	if args.task == 'sst2' and args.model_name == 'bert-base' and not USE_NON_PRUNED:
+		temp_model = model_wp
+	temp_model.save_pretrained(temp_dir)
+
+	# Load and save new config
+	config = BertConfig.from_pretrained(temp_dir)
+	config.pruning_threshold = i
+	config.k = np.inf
+	config.sparsity_file = os.path.join(temp_dir, 'sparsity.json')
+	config.save_pretrained(temp_dir)
+
+	if os.path.exists(config.sparsity_file): os.remove(config.sparsity_file)
+
+	# Load model and prune weights
+	if args.prune_weights: 
+		# Do weight pruning with fixed threshold
+		config.pruning_threshold = 0.025
+		config.save_pretrained(temp_dir)
+
+		if args.task == 'sst2':
+			temp_model = DTBertForSequenceClassification.from_pretrained(temp_dir)
+		else:
+			temp_model = DTBertForQuestionAnswering.from_pretrained(temp_dir)
+
+		if config.pruning_threshold > 0:
+			temp_model.prune_weights()
+
+			sparsity = json.load(open(config.sparsity_file))
+			matrix_sizes, num_zeros = 0, 0
+			for sp in sparsity:
+				num_zeros += sp[0]
+				matrix_sizes += sp[1]
+
+			print(f'Resultant weight sparsity: {num_zeros / matrix_sizes : 0.03f}')
+			result['weight_sparsity'] = num_zeros / matrix_sizes
+		else:
+			result['weight_sparsity'] = 0
+
+	# Save (weight-pruned) model
+	temp_model.save_pretrained(temp_dir)
+
+	# Update config
+	config.pruning_threshold = i
+	config.save_pretrained(temp_dir)
+
+	# Load model
+	if args.task == 'sst2':
+		temp_model = DTBertForSequenceClassification.from_pretrained(temp_dir)
+	else:
+		temp_model = DTBertForQuestionAnswering.from_pretrained(temp_dir)
+
+	if os.path.exists(config.sparsity_file): 
+		os.rename(config.sparsity_file, os.path.join(temp_dir, 'weight_sparsity.json'))
+
+	# Run evaluation on the SST-2 task or the SQuAD task
+	training_args = get_training_args(temp_dir, args.task, args.do_train, t, os.path.join(temp_dir, 'grad_sparsity.json'))
+	start_time = time.time()
+	metrics = run_glue(training_args) if args.task == 'sst2' else run_squad_legacy.evaluate(training_args, temp_model, tokenizer)
+	end_time = time.time()
+	print(metrics)
+
+	if i > 0:
+		sparsity = json.load(open(config.sparsity_file))
+		matrix_sizes, num_zeros = 0, 0
+		for sp in sparsity:
+			num_zeros += sp[0]
+			matrix_sizes += sp[1]
+
+		print(f'Resultant activation sparsity: {num_zeros / matrix_sizes : 0.03f}')
+		result['activation_sparsity'] = num_zeros / matrix_sizes
+	else:
+		result['activation_sparsity'] = 0
+	if t > 0:
+		sparsity = json.load(open(os.path.join(temp_dir, 'grad_sparsity.json')))
+		matrix_sizes, num_zeros = 0, 0
+		for sp in sparsity:
+			num_zeros += sp[0]
+			matrix_sizes += sp[1]
+
+		print(f'Resultant gradient sparsity: {num_zeros / matrix_sizes : 0.03f}')
+		result['grad_sparsity'] = num_zeros / matrix_sizes
+	else:
+		result['grad_sparsity'] = 0
+
+	if args.task == 'sst2':
+		result['accuracy'] = metrics['eval_accuracy'] 
+	else:
+		result['f1'] = metrics['f1']
+
+	result['time'] = end_time - start_time
+
+	json.dump(result, os.path.join(temp_dir, 'dynaprop_results.json'))
+
+	return result
+
+
 def main(args):
 	"""Dynamic pruning front-end function"""
 	assert args.task in ['sst2', 'squad_v2'], 'Only the SST2 and SQuAD v2 tasks are supported right now'
@@ -105,6 +222,7 @@ def main(args):
 	# Load all GLUE datasets
 	load_all_glue_datasets()
 
+	tokenizer_wp, model_wp = None, None
 	if args.task == 'sst2':
 		if args.model_name == 'bert-base':
 			if not os.path.exists('./models/bert-base-sst2/pytorch_model.bin'):
@@ -199,129 +317,35 @@ def main(args):
 		assert args.max_train_threshold is not None
 
 	if args.max_eval_threshold is not None and args.max_train_threshold is None:
-		eval_thresholds = list(np.arange(0, args.max_eval_threshold, 0.01))
+		eval_thresholds = list(np.arange(0, args.max_eval_threshold + 0.02, 0.02))
 		train_thresholds = [None for _ in range(len(eval_thresholds))]
 	elif args.max_train_threshold is not None and args.max_eval_threshold is None:
-		train_thresholds = list(np.arange(0, args.max_train_threshold, 5e-5))
+		train_thresholds = list(np.arange(0, args.max_train_threshold + 1e-4, 1e-4))
 		eval_thresholds = [0 for _ in range(len(train_thresholds))]
 	elif args.max_train_threshold is not None and args.max_eval_threshold is not None:
-		eval_thresholds, train_thresholds = np.meshgrid(np.arange(0, args.max_eval_threshold, 0.01), np.arange(0, args.max_train_threshold, 5e-5))
+		eval_thresholds, train_thresholds = np.meshgrid(np.arange(0, args.max_eval_threshold + 0.02, 0.02), np.arange(0, args.max_train_threshold + 1e-4, 1e-4))
 		eval_thresholds, train_thresholds = eval_thresholds.reshape(-1).tolist(), train_thresholds.reshape(-1).tolist()
 	else:
 		raise ValueError(f'Either max_pruning_threshold or min_grad_threshold has to be given')
 
 	k = MAX_K[args.task]
-	for i, t in zip(eval_thresholds, train_thresholds):
-		print(f'Running evaluation with inference threshold: {i} and training threshold: {t}')
-		result = {'eval_threshold': i, 'train_threshold': t}
-
-		# Make new output directory
-		temp_dir = os.path.join(output_dir, f'threshold_i-p{str(i)[2:]}_t-p{str(t)[2:]}')
-		if i in [result['eval_threshold'] for result in results] and t in [result['train_threshold'] for result in results]:
-			print(f'Results already stored')
-			continue
-
-		# Load and save tokenizer
-		temp_tokenizer = tokenizer
-		if args.task == 'sst2' and args.model_name == 'bert-base' and not USE_NON_PRUNED:
-			temp_tokenizer = tokenizer_wp
-		temp_tokenizer.save_pretrained(temp_dir)
-
-		# Initialize and save given model
-		temp_model = model
-		if args.task == 'sst2' and args.model_name == 'bert-base' and not USE_NON_PRUNED:
-			temp_model = model_wp
-		temp_model.save_pretrained(temp_dir)
-
-		# Load and save new config
-		config = BertConfig.from_pretrained(temp_dir)
-		config.pruning_threshold = i
-		config.k = k
-		config.sparsity_file = os.path.join(temp_dir, 'sparsity.json')
-		config.save_pretrained(temp_dir)
-
-		if os.path.exists(config.sparsity_file): os.remove(config.sparsity_file)
-
-		# Load model and prune weights
-		if args.prune_weights: 
-			# Do weight pruning with fixed threshold
-			config.pruning_threshold = 0.025
-			config.save_pretrained(temp_dir)
-
-			if args.task == 'sst2':
-				temp_model = DTBertForSequenceClassification.from_pretrained(temp_dir)
-			else:
-				temp_model = DTBertForQuestionAnswering.from_pretrained(temp_dir)
-
-			if config.pruning_threshold > 0:
-				temp_model.prune_weights()
-
-				sparsity = json.load(open(config.sparsity_file))
-				matrix_sizes, num_zeros = 0, 0
-				for sp in sparsity:
-					num_zeros += sp[0]
-					matrix_sizes += sp[1]
-
-				print(f'Resultant weight sparsity: {num_zeros / matrix_sizes : 0.03f}')
-				result['weight_sparsity'] = num_zeros / matrix_sizes
-			else:
-				result['weight_sparsity'] = 0
-
-		# Save (weight-pruned) model
-		temp_model.save_pretrained(temp_dir)
-
-		# Update config
-		config.pruning_threshold = i
-		config.save_pretrained(temp_dir)
-
-		# Load model
-		if args.task == 'sst2':
-			temp_model = DTBertForSequenceClassification.from_pretrained(temp_dir)
-		else:
-			temp_model = DTBertForQuestionAnswering.from_pretrained(temp_dir)
-
-		if os.path.exists(config.sparsity_file): 
-			os.rename(config.sparsity_file, os.path.join(temp_dir, 'weight_sparsity.json'))
-
-		# Run evaluation on the SST-2 task or the SQuAD task
-		training_args = get_training_args(temp_dir, args.task, args.do_train, t, os.path.join(temp_dir, 'grad_sparsity.json'))
-		start_time = time.time()
-		metrics = run_glue(training_args) if args.task == 'sst2' else run_squad_legacy.evaluate(training_args, temp_model, tokenizer)
-		end_time = time.time()
-		print(metrics)
-
-		if i > 0:
-			sparsity = json.load(open(config.sparsity_file))
-			matrix_sizes, num_zeros = 0, 0
-			for sp in sparsity:
-				num_zeros += sp[0]
-				matrix_sizes += sp[1]
-
-			print(f'Resultant activation sparsity: {num_zeros / matrix_sizes : 0.03f}')
-			result['activation_sparsity'] = num_zeros / matrix_sizes
-		else:
-			result['activation_sparsity'] = 0
-		if t > 0:
-			sparsity = json.load(open(os.path.join(temp_dir, 'grad_sparsity.json')))
-			matrix_sizes, num_zeros = 0, 0
-			for sp in sparsity:
-				num_zeros += sp[0]
-				matrix_sizes += sp[1]
-
-			print(f'Resultant gradient sparsity: {num_zeros / matrix_sizes : 0.03f}')
-			result['grad_sparsity'] = num_zeros / matrix_sizes
-		else:
-			result['grad_sparsity'] = 0
-
-		if args.task == 'sst2':
-			result['accuracy'] = metrics['eval_accuracy'] 
-		else:
-			result['f1'] = metrics['f1']
-
-		result['time'] = end_time - start_time
+	with mp.Pool(processes=NUM_PARALLEL) as pool:
+		results_list = pool.starmap(run_evaluation, [(i, 
+													 t, 
+													 args, 
+													 output_dir, 
+													 tokenizer, 
+													 tokenizer_wp, 
+													 model, 
+													 model_wp,
+													 results) for i, t in zip(eval_thresholds, train_thresholds)])
 		
-		results.append(result)
+		results.extend(results_list)
 		json.dump(results, open(os.path.join(output_dir, 'results.json'), 'w+'))
+
+	# for i, t in zip(eval_thresholds, train_thresholds):
+	# 	results.append(run_evaluation(i, t, args, output_dir, tokenizer, tokenizer_wp, model, model_wp, results))
+	# 	json.dump(results, open(os.path.join(output_dir, 'results.json'), 'w+'))
 
 	fig, ax1 = plt.subplots()
 	ax2 = ax1.twinx()
@@ -373,6 +397,8 @@ if __name__ == '__main__':
 	parser.set_defaults(prune_weights=False)
 
 	args = parser.parse_args()
+
+	mp.set_start_method('spawn')
 
 	main(args)
 
