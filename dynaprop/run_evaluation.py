@@ -105,7 +105,7 @@ def run_evaluation(i, t, args, output_dir, tokenizer, tokenizer_wp, model, model
 	temp_dir = os.path.join(output_dir, f'threshold_i-p{str(i)[2:]}_t-p{str(t)[2:]}')
 	if os.path.exists(os.path.join(temp_dir, 'dynaprop_results.json')):
 		print(f'Results already stored')
-		return json.load(os.path.join(temp_dir, 'dynaprop_results.json'))
+		return json.load(open(os.path.join(temp_dir, 'dynaprop_results.json')))
 
 	# Load and save tokenizer
 	temp_tokenizer = tokenizer
@@ -206,7 +206,7 @@ def run_evaluation(i, t, args, output_dir, tokenizer, tokenizer_wp, model, model
 
 	result['time'] = end_time - start_time
 
-	json.dump(result, os.path.join(temp_dir, 'dynaprop_results.json'))
+	json.dump(result, open(os.path.join(temp_dir, 'dynaprop_results.json'), 'w+'))
 
 	return result
 
