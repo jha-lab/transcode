@@ -44,7 +44,7 @@ PREFIX_CHECKPOINT_DIR = "checkpoint"
 GLUE_TASKS = ['cola', 'mnli', 'mrpc', 'qnli', 'qqp', 'rte', 'sst2', 'stsb', 'wnli']
 MAX_K = {'sst2': 512, 'squad_v2': 384}
 NUM_EPOCHS = 3
-NUM_PARALLEL = 8
+NUM_PARALLEL = 16
 
 
 def get_training_args(output_dir, task, do_train, train_threshold, sparsity_file):
