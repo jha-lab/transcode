@@ -138,11 +138,11 @@ def embedding_to_config(embedding: list, design_space: dict):
 
     i = 0
     for tile in config['tile'].keys():
-        config['tile'][tile] = embedding[i]
+        config['tile'][tile] = int(embedding[i])
         i += 1
 
     for decision in ['pe', 'lanes_per_pe', 'mac_per_lane', 'softmax_per_pe', 'batch_size', 'activation_buffer_size', 'weight_buffer_size', 'mask_buffer_size']:
-        config[decision] = embedding[i]
+        config[decision] = int(embedding[i])
         i += 1
 
     ordered_configs = [('rram', 16, 2, 2), ('rram', 8, 2, 4), ('rram', 4, 2, 8), ('rram', 2, 2, 16), ('rram', 32, 2, 1), ('rram', 1, 2, 32), ('dram', 16, 2, 2), ('dram', 8, 2, 4), ('dram', 32, 2, 1), ('dram', 16, 4, 1), ('hbm', 32, 1, 4)] 
