@@ -63,7 +63,6 @@ weight_buffer_size: # In MBs
   - 128
 
 mask_buffer_size: # In MBs
-  - 0.5
   - 1
   - 2
   - 4
