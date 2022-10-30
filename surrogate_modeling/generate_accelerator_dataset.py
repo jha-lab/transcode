@@ -50,7 +50,7 @@ def predict_fn(gbdtr, X):
     for estimator in gbdtr.estimators_:
         pred = estimator[0].predict(X)
         dt_preds.append(pred)
-    std = float(np.std(np.array(dt_preds)))
+    std = float(np.std(np.array(dt_preds)))/10.0
 
     return float(np.random.normal(mean, std))
 
