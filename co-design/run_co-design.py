@@ -41,10 +41,10 @@ from tqdm.notebook import tqdm
 
 # Define max measures for co-design
 MAX_GLUE = 1
-MAX_AREA = 12500 # in mm2
-MAX_DYNAMIC_ENERGY = 3e9 # in nJ
-MAX_LEAKAGE_ENERGY = 1e8 # in nJ
-MAX_CYCLES = 50e6
+MAX_AREA = 30000 # in mm2
+MAX_DYNAMIC_ENERGY = 8e9 # in nJ
+MAX_LEAKAGE_ENERGY = 2e8 # in nJ
+MAX_CYCLES = 60e6
 
 # Define hyperparameters for co-design
 K_GLUE = 0.5
@@ -54,8 +54,8 @@ K_LEAKAGE_ENERGY = 0.1
 K_LATENCY = 0.1
 
 PERFORMANCE_PATIENCE = 5
-RANDOM_SAMPLES = 100
-K = 8
+RANDOM_SAMPLES = 10 # 100
+K = 2 # 8
 
 LOAD_FROM_PRETRAINED = True
 MIN_PERFORMANCE = -1
@@ -90,8 +90,12 @@ def dict_to_energies(energy_dict):
 	return dynamic_energy, leakage_energy
 
 
-def get_performance(txf_embedding, acc_embedding, txf_hash, acc_hash, txf_model_dict, acc_config, gbdtr, constants, design_space_acceltran):
-	y_glue_new = predict_fn(gbdtr, txf_embedding.reshape(1, -1))
+def simulate_pair(txf_embedding, acc_embedding, txf_hash, acc_hash, txf_model_dict, acc_config, gbdtr, constants, design_space_acceltran):
+	glue_score = predict_fn(gbdtr, txf_embedding.reshape(1, -1))
+
+	results_file_path = f'./logs/{acc_hash}_{txf_hash}/metrics/results.json'
+	if os.path.exists(results_file_path):
+		return json.load(open(results_file_path))
 
 	os.makedirs(f'./logs/{acc_hash}_{txf_hash}/metrics', exist_ok=True)
 	try:
@@ -101,19 +105,48 @@ def get_performance(txf_embedding, acc_embedding, txf_hash, acc_hash, txf_model_
 							 design_space=design_space_acceltran,
 							 logs_dir=f'./logs/{acc_hash}_{txf_hash}/',
 							 plot_steps=10000)
-		
-		y_latency_new = logs['cycles']
-		y_dyn_energy_new, y_leak_energy_new = dict_to_energies(logs['energy'])
-		y_area = logs['area']
-		
-		performance = K_GLUE * (y_glue_new / MAX_GLUE) + \
-					  K_LATENCY * (1 - y_latency_new / MAX_CYCLES) + \
-					  K_DYNAMIC_ENERGY * (1 - y_dyn_energy_new / MAX_DYNAMIC_ENERGY) + \
-					  K_LEAKAGE_ENERGY * (1 - y_leak_energy_new / MAX_LEAKAGE_ENERGY)
-	except RuntimeError:
-		performance = MIN_PERFORMANCE
 
-	return performance
+		dataset = {}
+		dataset[f'{acc_embedding}_{txf_embedding}'] = {'model_dict': txf_model_dict, 
+													   'txf_embedding': list(map(int, txf_embedding)),
+													   'glue_score': glue_score,
+													   'acc_embedding': list(map(int, acc_embedding)),
+													   'logs_fast': logs}
+
+		json.dump(dataset, open(f'./logs/{acc_hash}_{txf_hash}/metrics/results.json', 'w+'))
+		return dataset
+	except RuntimeError:
+		return {}
+
+
+def get_performances(dataset_list, dataset):
+	# Get performances from the given dataset list and update main dataset dictionary
+	performances = []
+
+	for sample_dict in dataset_list:
+		if sample_dict:
+			assert len(sample_dict) == 1
+			dataset.update(sample_dict)
+
+			results = list(sample_dict.values())[0]
+			y_glue_new = results['glue_score']
+			logs = results['logs_fast']
+
+
+			y_latency_new = logs['cycles']
+			y_dyn_energy_new, y_leak_energy_new = dict_to_energies(logs['energy'])
+			y_area = logs['area']
+			
+			performance = K_GLUE * (y_glue_new / MAX_GLUE) + \
+						  K_LATENCY * (1 - y_latency_new / MAX_CYCLES) + \
+						  K_DYNAMIC_ENERGY * (1 - y_dyn_energy_new / MAX_DYNAMIC_ENERGY) + \
+						  K_LEAKAGE_ENERGY * (1 - y_leak_energy_new / MAX_LEAKAGE_ENERGY)
+		else:
+			performance = MIN_PERFORMANCE
+
+		performances.append(performance)
+
+	return performances, dataset
 
 
 def main(args):
@@ -162,7 +195,7 @@ def main(args):
 		
 		if dynamic_energy > max_dynamic_energy: max_dynamic_energy = dynamic_energy
 		if leakage_energy > max_leakage_energy: max_leakage_energy = leakage_energy
-			
+
 	assert MAX_AREA > max_area
 	assert MAX_DYNAMIC_ENERGY > max_dynamic_energy 
 	assert MAX_LEAKAGE_ENERGY > max_leakage_energy 
@@ -236,7 +269,7 @@ def main(args):
 
 		# Get performances parallely for all queries
 		with mp.Pool(processes=NUM_CORES) as pool:
-			performances = pool.starmap(get_performance, [(random_samples[i][0],
+			dataset_list = pool.starmap(simulate_pair, [(random_samples[i][0],
 														   random_samples[i][1],
 														   list(random_txf_sample_dicts.keys())[i],
 														   list(random_acc_sample_dicts.keys())[i],
@@ -245,6 +278,8 @@ def main(args):
 														   gbdtr,
 														   constants,
 														   design_space_acceltran) for i in set(query_indices)])
+
+		performances, dataset = get_performances(dataset_list, dataset)
 
 		for i, performance in enumerate(performances):
 			y_new = np.array([1 - performance])
@@ -272,6 +307,7 @@ def main(args):
 
 		# Save expanded dataset
 		np.savez('./dataset/boshcode.npz', X_txf=X_txf, X_acc=X_acc, y=y, max_loss=max_loss)
+		json.dump(dataset, open('./dataset/dataset_boshcode.json', 'w+'))
 
 	# Get the details on the best pair
 	best_txf_embedding = X_txf[np.argmin(y), :]
