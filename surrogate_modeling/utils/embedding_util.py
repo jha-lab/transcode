@@ -137,7 +137,7 @@ def embedding_to_config(embedding: list, design_space: dict):
     config = {'tile': {'tile_b': None, 'tile_x': None , 'tile_y': None}, 'non_linearity': 'gelu', 'pe': None, 'lanes_per_pe': None, 'mac_per_lane': None, 'softmax_per_pe': None, 'batch_size': None, 'activation_buffer_size': None, 'weight_buffer_size': None, 'mask_buffer_size': None, 'loop_unrolling': None, 'main_memory': {'type': None, 'mode': None, 'banks': None, 'ranks': None, 'channels': None}, 'scheduler': {'compute_ops': {'tiled': True, 'batch_size': None}, 'memory_ops': {'tiled': False, 'batch_size': 1}}}
 
     i = 0
-    for tile in config['tile'].keys():
+    for tile in ['tile_b', 'tile_x', 'tile_y']:
         config['tile'][tile] = int(embedding[i])
         i += 1
 
@@ -173,7 +173,7 @@ def config_to_embedding(config: dict, design_space: dict):
     embedding = [0 for _ in range(12)]
 
     i = 0
-    for tile in config['tile'].keys():
+    for tile in ['tile_b', 'tile_x', 'tile_y']:
         embedding[i] = config['tile'][tile]
         i += 1
 
@@ -294,6 +294,8 @@ def is_valid_embedding(embedding: list, design_space: dict, space: str = 'transf
         for tile in design_space['tile'].keys():
             if embedding[i] not in design_space['tile'][tile]: return False
             i += 1
+
+        if embedding[1] != embedding[2]: return False
 
         for decision in ['pe', 'lanes_per_pe', 'mac_per_lane', 'softmax_per_pe', 'batch_size', 'activation_buffer_size', 'weight_buffer_size', 'mask_buffer_size']:
             if embedding[i] not in design_space[decision]: return False
