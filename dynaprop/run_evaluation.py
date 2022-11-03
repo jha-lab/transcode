@@ -44,7 +44,8 @@ PREFIX_CHECKPOINT_DIR = "checkpoint"
 GLUE_TASKS = ['cola', 'mnli', 'mrpc', 'qnli', 'qqp', 'rte', 'sst2', 'stsb', 'wnli']
 MAX_K = {'sst2': 512, 'squad_v2': 384}
 NUM_EPOCHS = 3
-NUM_PARALLEL = 16
+NUM_PARALLEL = 2
+FIXED_EVAL_THRESHOLD = 0.06
 
 
 def get_training_args(output_dir, task, do_train, train_threshold, sparsity_file):
@@ -57,8 +58,8 @@ def get_training_args(output_dir, task, do_train, train_threshold, sparsity_file
 			--logging_steps 50 \
 			--max_seq_length 512 \
 			--overwrite_output_dir \
-			--per_device_train_batch_size 64 \
-			--per_device_eval_batch_size 64 \
+			--per_device_train_batch_size 32 \
+			--per_device_eval_batch_size 32 \
 			--dynaprop_min_norm {train_threshold} \
 			--dynaprop_json_file {sparsity_file} \
 			--output_dir {output_dir}'
@@ -72,8 +73,8 @@ def get_training_args(output_dir, task, do_train, train_threshold, sparsity_file
 			--logging_steps 50 \
 			--max_seq_length 384 \
 			--overwrite_output_dir \
-			--per_device_train_batch_size 512 \
-			--per_device_eval_batch_size 64 \
+			--per_device_train_batch_size 32 \
+			--per_device_eval_batch_size 32 \
 			--dynaprop_min_norm {train_threshold} \
 			--dynaprop_json_file {sparsity_file} \
 			--output_dir {output_dir}'
@@ -304,7 +305,7 @@ def main(args):
 			tokenizer = BertTokenizer.from_pretrained('./models/bert-tiny-squad_v2/')
 			model = DTBertForQuestionAnswering.from_pretrained('./models/bert-tiny-squad_v2/')
 
-	output_dir = os.path.join('./results/' if USE_NON_PRUNED else './results/nn_pruning/', f'{args.model_name}_{args.task}{"_di" if args.max_eval_threshold is not None else ""}{"_dt" if args.max_train_threshold > 0 else ""}{"_wp" if args.prune_weights else ""}')
+	output_dir = os.path.join('./results1/' if USE_NON_PRUNED else './results/nn_pruning/', f'{args.model_name}_{args.task}{"_di" if args.max_eval_threshold is not None else ""}{"_dt" if args.max_train_threshold > 0 else ""}{"_wp" if args.prune_weights else ""}')
 
 	print(f'Output directory: {output_dir}')
 
@@ -317,13 +318,13 @@ def main(args):
 		assert args.max_train_threshold is not None
 
 	if args.max_eval_threshold is not None and args.max_train_threshold is None:
-		eval_thresholds = list(np.arange(0, args.max_eval_threshold + 0.02, 0.02))
+		eval_thresholds = list(np.arange(0, args.max_eval_threshold + 0.002, 0.02))
 		train_thresholds = [None for _ in range(len(eval_thresholds))]
 	elif args.max_train_threshold is not None and args.max_eval_threshold is None:
-		train_thresholds = list(np.arange(0, args.max_train_threshold + 1e-4, 1e-4))
-		eval_thresholds = [0 for _ in range(len(train_thresholds))]
+		train_thresholds = list(np.arange(args.min_train_threshold, args.max_train_threshold + 1e-5, 1e-4))
+		eval_thresholds = [FIXED_EVAL_THRESHOLD for _ in range(len(train_thresholds))]
 	elif args.max_train_threshold is not None and args.max_eval_threshold is not None:
-		eval_thresholds, train_thresholds = np.meshgrid(np.arange(0, args.max_eval_threshold + 0.02, 0.02), np.arange(0, args.max_train_threshold + 1e-4, 1e-4))
+		eval_thresholds, train_thresholds = np.meshgrid(np.arange(0, args.max_eval_threshold + 0.002, 0.02), np.arange(0, args.max_train_threshold + 1e-5, 1e-4))
 		eval_thresholds, train_thresholds = eval_thresholds.reshape(-1).tolist(), train_thresholds.reshape(-1).tolist()
 	else:
 		raise ValueError(f'Either max_pruning_threshold or min_grad_threshold has to be given')
@@ -342,10 +343,6 @@ def main(args):
 		
 		results.extend(results_list)
 		json.dump(results, open(os.path.join(output_dir, 'results.json'), 'w+'))
-
-	# for i, t in zip(eval_thresholds, train_thresholds):
-	# 	results.append(run_evaluation(i, t, args, output_dir, tokenizer, tokenizer_wp, model, model_wp, results))
-	# 	json.dump(results, open(os.path.join(output_dir, 'results.json'), 'w+'))
 
 	fig, ax1 = plt.subplots()
 	ax2 = ax1.twinx()
@@ -386,6 +383,11 @@ if __name__ == '__main__':
 		type=float,
 		default=None,
 		help='maximum threhold for DynaProp')
+	parser.add_argument('--min_train_threshold',
+		metavar='',
+		type=float,
+		default=0,
+		help='minimum threhold for DynaProp')
 	parser.add_argument('--do_train',
 		dest='do_train',
 		action='store_true',
