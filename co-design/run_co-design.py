@@ -9,6 +9,7 @@ import yaml
 import time
 import pickle
 import shutil
+import hashlib
 import argparse
 import itertools
 import numpy as np
@@ -20,6 +21,10 @@ from matplotlib import pyplot as plt
 sys.path.append('../surrogate_modeling/utils')
 
 import embedding_util
+
+sys.path.append('../../txf_design-space/flexibert')
+
+from embeddings.utils import graph_util
 
 sys.path.append('../boshnas/boshnas/')
 
@@ -54,8 +59,8 @@ K_LEAKAGE_ENERGY = 0.1
 K_LATENCY = 0.1
 
 PERFORMANCE_PATIENCE = 5
-RANDOM_SAMPLES = 10 # 100
-K = 2 # 8
+RANDOM_SAMPLES = 100
+K = 4
 
 LOAD_FROM_PRETRAINED = True
 MIN_PERFORMANCE = -1
@@ -90,20 +95,20 @@ def dict_to_energies(energy_dict):
 	return dynamic_energy, leakage_energy
 
 
-def simulate_pair(txf_embedding, acc_embedding, txf_hash, acc_hash, txf_model_dict, acc_config, gbdtr, constants, design_space_acceltran):
+def simulate_pair(mode, txf_embedding, acc_embedding, txf_hash, acc_hash, txf_model_dict, acc_config, gbdtr, constants, design_space_acceltran):
 	glue_score = predict_fn(gbdtr, txf_embedding.reshape(1, -1))
 
-	results_file_path = f'./logs/{acc_hash}_{txf_hash}/metrics/results.json'
+	results_file_path = f'./{mode}/logs/{acc_hash}_{txf_hash}/metrics/results.json'
 	if os.path.exists(results_file_path):
 		return json.load(open(results_file_path))
 
-	os.makedirs(f'./logs/{acc_hash}_{txf_hash}/metrics', exist_ok=True)
+	os.makedirs(f'./{mode}/logs/{acc_hash}_{txf_hash}/metrics', exist_ok=True)
 	try:
 		logs = simulate_fast(model_dict=txf_model_dict, 
 							 config=acc_config,
 							 constants=constants,
 							 design_space=design_space_acceltran,
-							 logs_dir=f'./logs/{acc_hash}_{txf_hash}/',
+							 logs_dir=f'./{mode}/logs/{acc_hash}_{txf_hash}/',
 							 plot_steps=10000)
 
 		dataset = {}
@@ -113,7 +118,7 @@ def simulate_pair(txf_embedding, acc_embedding, txf_hash, acc_hash, txf_model_di
 													   'acc_embedding': list(map(int, acc_embedding)),
 													   'logs_fast': logs}
 
-		json.dump(dataset, open(f'./logs/{acc_hash}_{txf_hash}/metrics/results.json', 'w+'))
+		json.dump(dataset, open(f'./{mode}/logs/{acc_hash}_{txf_hash}/metrics/results.json', 'w+'))
 		return dataset
 	except RuntimeError:
 		return {}
@@ -163,6 +168,22 @@ def main(args):
 	bounds_accel = (np.array([bound[0] for bound in bounds_accel]), \
 						np.array([bound[1] for bound in bounds_accel]))
 
+	# Get accelerator or transformer values to fix
+	assert args.acc_embedding is None or args.txf_embedding is None
+	mode = 'co_des'
+	acc_embedding, txf_embedding = None, None
+	if args.acc_embedding is not None:
+		fix_acc_embedding = [int(val) for val in args.acc_embedding.split(',')]
+		fix_acc_config = embedding_util.embedding_to_config(fix_acc_embedding, design_space_acceltran)
+		fix_acc_hash = hashlib.md5(str(fix_acc_embedding).encode('utf-8')).hexdigest()
+		mode = 'hw-nas'
+	if args.txf_embedding is not None:
+		fix_txf_embedding = [int(val) for val in args.txf_embedding.split(',')]
+		fix_txf_model_dict = embedding_util.embedding_to_model_dict(fix_txf_embedding, design_space_flexibert)
+		model_graph = graph_util.model_dict_to_graph(fix_txf_model_dict)
+		fix_txf_hash = graph_util.hash_graph(*model_graph, model_dict=fix_txf_model_dict)
+		mode = 'acc_sch'
+
 	# Instantiate the BOSHCODE surrogate
 	surrogate_model = BOSHCODE(input_dim1=37, # transformer embeddings
 							   input_dim2=12, # accelerator embeddings
@@ -172,8 +193,8 @@ def main(args):
 							   second_order=True,
 							   parallel=True,
 							   model_aleatoric=True,
-							   save_path='./dataset/surrogate_model/',
-							   pretrained=LOAD_FROM_PRETRAINED)
+							   save_path=f'./{mode}/dataset/surrogate_model/',
+							   pretrained=LOAD_FROM_PRETRAINED and os.path.exists(f'./{mode}/dataset/surrogate_model/'))
 
 	# Load FlexiBERT 2.0 surrogate model
 	gbdtr = pickle.load(open(args.flexibert_surrogate, 'rb'))
@@ -231,12 +252,16 @@ def main(args):
 	max_loss = np.amax(y)
 	y = y / max_loss
 
-	if os.path.exists('./dataset/boshcode.npz'):
-		np_load = np.load('./dataset/boshcode.npz')
+	if os.path.exists(f'./{mode}/dataset/boshcode.npz'):
+		np_load = np.load(f'./{mode}/dataset/boshcode.npz')
 		X_txf = np_load['X_txf']
 		X_acc = np_load['X_acc']
 		y = np_load['y']
 		max_loss = np_load['max_loss']
+	elif mode in ['hw-nas', 'acc_sch']:
+		X_txf = np.array([], shape=(0, X_txf.shape[1]), dtype=X_txf.dtype)
+		X_acc = np.array([], shape=(0, X_acc.shape[1]), dtype=X_acc.dtype)
+		y = np.array([])
 
 	print(f'Current iteration: 0. \tBest performance: {np.amin(y)}')
 
@@ -245,21 +270,21 @@ def main(args):
 		train_error = surrogate_model.train(X_txf, X_acc, y)
 
 	# Run co-design with exploration on random samples
-	best_performance, old_best_performance, same_performance, itn = np.amin(y), np.inf, 0, 0
+	best_performance, old_best_performance, same_performance, itn = np.amin(y) if y.shape[0] > 0 else np.inf, np.inf, 0, 0
 	while same_performance < PERFORMANCE_PATIENCE:
 		random_txf_sample_dicts = embedding_util.get_samples(design_space_flexibert, 
 												num_samples=RANDOM_SAMPLES, 
 												sampling_method='Random', 
 												space='transformer',
 												debug=False)
-		random_txf_samples = [random_txf_sample_dicts[model]['embedding'] for model in random_txf_sample_dicts.keys()]
+		random_txf_samples = [random_txf_sample_dicts[model]['embedding'] if args.txf_embedding is None else fix_txf_embedding for model in random_txf_sample_dicts.keys()]
 		
 		random_acc_sample_dicts = embedding_util.get_samples(design_space_acceltran, 
 												num_samples=RANDOM_SAMPLES, 
 												sampling_method='Random', 
 												space='accelerator',
 												debug=False)
-		random_acc_samples = [random_acc_sample_dicts[acc] for acc in random_acc_sample_dicts.keys()]
+		random_acc_samples = [random_acc_sample_dicts[acc] if args.acc_embedding is None else fix_acc_embedding for acc in random_acc_sample_dicts.keys()]
 		
 		random_samples = [(np.array(random_txf_samples[i]), 
 						   np.array(random_acc_samples[i])) for i in range(RANDOM_SAMPLES)]
@@ -269,15 +294,35 @@ def main(args):
 
 		# Get performances parallely for all queries
 		with mp.Pool(processes=NUM_CORES) as pool:
-			dataset_list = pool.starmap(simulate_pair, [(random_samples[i][0],
-														   random_samples[i][1],
-														   list(random_txf_sample_dicts.keys())[i],
-														   list(random_acc_sample_dicts.keys())[i],
-														   random_txf_sample_dicts[list(random_txf_sample_dicts.keys())[i]]['model_dict'],
-														   embedding_util.embedding_to_config(random_samples[i][1].tolist(), design_space_acceltran),
-														   gbdtr,
-														   constants,
-														   design_space_acceltran) for i in set(query_indices)])
+			num_queries = len(set(query_indices))
+			if args.txf_embedding is not None:
+				txf_embeddings = [np.array(fix_txf_embedding) for _ in range(num_queries)]
+				txf_hashes = [fix_txf_hash for _ in range(num_queries)]
+				txf_model_dicts = [fix_txf_model_dict for _ in range(num_queries)]
+			else:
+				txf_embeddings = [random_samples[i][0] for i in set(query_indices)]
+				txf_hashes = [list(random_txf_sample_dicts.keys())[i] for i in set(query_indices)]
+				txf_model_dicts = [random_txf_sample_dicts[list(random_txf_sample_dicts.keys())[i]]['model_dict'] for i in set(query_indices)]
+
+			if args.acc_embedding is not None:
+				acc_embeddings = [fix_acc_embedding for _ in range(num_queries)]
+				acc_hashes = [fix_acc_hash for _ in range(num_queries)]
+				acc_configs = [fix_acc_config for _ in range(num_queries)]
+			else:
+				acc_embeddings = [random_samples[i][1] for i in set(query_indices)]
+				acc_hashes = [list(random_acc_sample_dicts.keys())[i] for i in set(query_indices)]
+				acc_configs = [embedding_util.embedding_to_config(random_samples[i][1].tolist(), design_space_acceltran) for i in set(query_indices)]
+
+			dataset_list = pool.starmap(simulate_pair, [(mode,
+														 txf_embeddings[i],
+														 acc_embeddings[i],
+														 txf_hashes[i],
+														 acc_hashes[i],
+														 txf_model_dicts[i],
+														 acc_configs[i],
+														 gbdtr,
+														 constants,
+														 design_space_acceltran) for i in range(num_queries)])
 
 		performances, dataset = get_performances(dataset_list, dataset)
 
@@ -306,8 +351,8 @@ def main(args):
 		train_error = surrogate_model.train(X_txf, X_acc, y)
 
 		# Save expanded dataset
-		np.savez('./dataset/boshcode.npz', X_txf=X_txf, X_acc=X_acc, y=y, max_loss=max_loss)
-		json.dump(dataset, open('./dataset/dataset_boshcode.json', 'w+'))
+		np.savez(f'./{mode}/dataset/boshcode.npz', X_txf=X_txf, X_acc=X_acc, y=y, max_loss=max_loss)
+		json.dump(dataset, open(f'./{mode}/dataset/dataset_boshcode.json', 'w+'))
 
 	# Get the details on the best pair
 	best_txf_embedding = X_txf[np.argmin(y), :]
@@ -349,6 +394,16 @@ if __name__ == '__main__':
 		type=str,
 		default='../acceltran/simulator/constants/constants.yaml',
 		help='path to the accelerator simulation constants file')
+	parser.add_argument('--acc_embedding',
+		metavar='',
+		type=str,
+		default=None,
+		help='accelerator embedding to run HW-NAS')
+	parser.add_argument('--txf_embedding',
+		metavar='',
+		type=str,
+		default=None,
+		help='transformer embedding to run accelerator search')
 	
 	args = parser.parse_args()
 
